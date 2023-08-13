@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Distance-based Square Animation</title>
+  <style>
+    #square-container {
+      position: fixed;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 50px;
+      height: 0;
+      background-color: #000000;
+      transition: height 0.5s ease;
+    }
+
+    #sensor-status {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      font-size: 16px;
+      font-weight: bold;
+      color: #ffffff;
+    }
+  </style>
+</head>
+<body>
+  <div id="square-container"></div>
+  <div id="sensor-status"></div>
+
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script src="https://unpkg.com/obniz@latest/obniz.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+  <script>
+    // const axios = require('axios');
+
+    // IFTTTのWebhooks Keyを設定してください
+    const iftttWebhooksKey = 'f0YwW4uX_Hwb_5VUW8zA1';
+
+    // 送信したいイベント名（Thisの部分）を設定してください
+    const eventName = 'open';
+
+// obnizからIFTTTにGETリクエストを送信する関数
+  async function sendToIFTTT(event) {
+        const iftttWebhooksURL = `https://maker.ifttt.com/trigger/${eventName}/with/key/${iftttWebhooksKey}`;
+        
+
+        try {
+          const response = await axios.get(iftttWebhooksURL);
+          console.log('IFTTT Webhooks Success:', response.data);
+        } catch (error) {
+          console.error('IFTTT Webhooks Error:', error.message);
+        }
+      }
+
+
+
+    var obniz = new Obniz("OBNIZ_ID_HERE");
+    var hcsr04;
+    var speaker;
+    //オープンウェザAPIkey
+    var weatherAPIKey = "8eb83529dd8a577eaa1886328f1f452f";
+    var weatherURL = `https://api.openweathermap.org/data/2.5/weather?q=Tokyo%2Cjp&appid=${weatherAPIKey}`;
+
+    obniz.onconnect = async function() {
+      hcsr04 = obniz.wired("HC-SR04", {gnd:0, echo:1, trigger:2, vcc:3});
+      speaker = obniz.wired("Keyestudio_Buzzer",{signal: 9, vcc: 10, gnd: 11});
+      
+      function playBuzzer() {
+        speaker.play(110.000); // A2(ラ)の周波数でブザーを鳴らす
+        
+        setTimeout(function() {
+          speaker.stop(); // ブザーを停止
+        }, 1000); // 1000ミリ秒 (1秒) 後にブザーを停止
+      }
+
+      function updateSquareHeight(distance) {
+        var squareElement = $('#square-container');
+        var height = Math.max(0, distance - 100); // センサーの値から100を引いた値を高さとする（最小値は0）
+        squareElement.css('height', height + 'px');
+      }
+      
+      setInterval(async function() {
+        if (obniz.isValidIO(3)) {
+          var distance = await hcsr04.measureWait();
+          console.log("Distance: " + distance + " mm");
+          if (distance !== undefined && distance <= 250) {
+            var message = "センサーが反応しました！";
+            sendToIFTTT(message); // IFTTTに通知を送信
+            playBuzzer();
+            sendDataToGoogleSheet(distance);
+          } else {
+            isSensorActive = false;
+            updateSquareHeight(0);
+            $("#sensor-status").text("Sensor Inactive");
+          }
+        }
+      }, 5000);
+    };
+
+    var currentTime;
+    async function sendDataToGoogleSheet(distance) {
+      var cityName = "Tokyo";
+      currentTime = new Date().toISOString();
+      var weatherData = await fetchWeatherData(cityName);
+
+      var data = [
+        { "データ1": currentTime, "データ2": distance, "データ3": weatherData }
+      ];
+
+      var sheetDBEndpoint = "https://sheetdb.io/api/v1/hdwu00rz5w1vk";
+
+      var request = {
+        url: sheetDBEndpoint,
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+       
+        data: JSON.stringify(data)
+      };
+
+      $.ajax(request)
+        .done(function(response) {
+          console.log("Data saved successfully");
+        })
+        .fail(function(error) {
+          console.error("Failed to save data:", error);
+        });
+    }
+
+    async function fetchWeatherData(cityName) {
+      var weatherURL = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(cityName)}&appid=${weatherAPIKey}`;
+      try {
+        var response = await fetch(weatherURL);
+        var data = await response.json();
+        var weatherDescription = data.weather[0].description;
+        return weatherDescription;
+      } catch (error) {
+        console.error("Error fetching weather data:", error);
+        return "N/A";
+      }
+    }
+  </script>
+</body>
+</html>
